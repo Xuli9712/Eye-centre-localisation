@@ -1,5 +1,6 @@
 import numpy as np
 import torch
+import torch.nn.functional as F
 
 def extract_keypoints_from_heatmap(heatmap):
     num_keypoints = heatmap.shape[0]
@@ -86,10 +87,34 @@ def extract_keypoints_from_heatmap_to_ori_size_batch(heatmaps, widths_orig, heig
 
 # 输入均为放cuda上的一个batch的tensor数据，返回该batch根据映射回原切出眼睛图像的坐标系上的keypoints坐标与label的欧式距离，除以瞳孔距离
 def cal_batch_error(pred_hm, eye_pts, Width, Height, pupil_dist):
-    pred_pts = extract_keypoints_from_heatmap_to_ori_size_batch(pred_hm, Width, Height)
+    #pred_pts = extract_keypoints_from_heatmap_to_ori_size_batch(pred_hm, Width, Height)
+    pred_pts = heatmap2coord(pred_hm, Width, Height, topk=9)
     eu_dist = torch.sqrt(torch.sum((pred_pts - eye_pts)**2, dim=-1))
     norm_eu_dist = eu_dist / pupil_dist
     error = torch.mean(eu_dist)
     norm_error = torch.mean(norm_eu_dist)
     return error, norm_error
+
+# 使用random rounding 转换heatmaps->keypoints 注意，输入输出都是cuda上的tensor
+def heatmap2coord(heatmap, org_W, org_H, topk=9):
+    N, C, H, W = heatmap.shape
+    score, index = heatmap.view(N, C, 1, -1).topk(topk, dim=-1)
+    
+    # Here we replace 'index // W' with 'torch.div(index, W, rounding_mode='trunc')'
+    coord = torch.cat([index % W, torch.div(index, W, rounding_mode='trunc')], dim=2)
+
+    # calculate the coordinates in original size
+    keypoints = (coord * F.softmax(score, dim=-1)).sum(-1)
+
+    # scale the coordinates back to original image size
+    # 假设你的keypoints的形状是(N,3,2)，两个缩放因子的形状都是(N,1,1)
+    scale_factor_W = (org_W / W).view(N, 1, 1)
+    scale_factor_H = (org_H / H).view(N, 1, 1)
+    scale_factors = torch.cat([scale_factor_W, scale_factor_H], dim=-1)
+    scale_factors = scale_factors.expand_as(keypoints)
+    
+    keypoints *= scale_factors
+
+    return keypoints
+
 

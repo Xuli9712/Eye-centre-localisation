@@ -81,9 +81,9 @@ class gi4e(data.Dataset):
 
         heatmaps = torch.Tensor(target)
         tpts = torch.Tensor(tpts)
-        '''
+        
         meta = {'index': idx, 'pts': torch.Tensor(pts), 'tpts': tpts}
-        convert_pts = extract_keypoints_from_heatmap(target, W, H)
+        convert_pts = extract_keypoints_from_heatmap_to_ori_size(target, W, H)
         
         # Display original and resized images with landmarks
         plt.figure(figsize=(10, 10))
@@ -99,9 +99,8 @@ class gi4e(data.Dataset):
             plt.title(f"Target {i+1}")
 
         plt.show()
-        '''
-       
         
+
         # 返回的图像为256*256大小，热力图为64*64 pts为在原图尺寸上的坐标位置
 
         return img, heatmaps
@@ -164,82 +163,95 @@ class gi4e_eye(data.Dataset):
             image_path = os.path.join(self.data_path, self.label[idx][0])
             
             pts = self.label[idx][1]
+            pupil_dist = self.label[idx][2]
             npoints = len(pts)
 
             img = Image.open(image_path)
-            ori_img = img.copy()
-            H, W = img.size
+            #ori_img = img.copy()
+            Height, Width = img.size
             
 
             img = self.transformEye(img)
 
             target = np.zeros((npoints, self.heatmap_size[0], self.heatmap_size[1]))
             tpts = pts.copy()
+            eye_pts = []
 
             for i in range(npoints):
                 orig_x, orig_y = tpts[i][0], tpts[i][1]
  
-                x_scale = self.heatmap_size[0] / W
-                y_scale = self.heatmap_size[1] / H
+                x_scale = self.heatmap_size[0] / Width
+                y_scale = self.heatmap_size[1] / Height
 
                 scaled_x = orig_x * x_scale
                 scaled_y = orig_y * y_scale
 
                 target[i] = generate_target(target[i], (scaled_x, scaled_y), self.sigma, label_type='Gaussian')
-
-            heatmaps = torch.Tensor(target)
-            tpts = torch.Tensor(tpts)
-            '''
-            convert_pts = extract_keypoints_from_heatmap_to_ori_size(target, W, H)
+                eye_pts.append([orig_x, orig_y])
             
+            #print("eye pts: ", eye_pts)
+            heatmaps = torch.Tensor(target)
+            eye_pts = torch.Tensor(eye_pts)
+            convert_pts = extract_keypoints_from_heatmap_to_ori_size(target, Width, Height)
+
+            #print("converted pts: ", convert_pts)
+            '''
             plt.figure(figsize=(10, 10))
             plt.subplot(1, 7, 1)
             plt.imshow(ori_img)
-            plt.scatter(convert_pts[:, 0], convert_pts[:, 1], s=5, marker='.', c='r')
+            plt.scatter(convert_pts[:, 0], convert_pts[:, 1], s=3, marker='.', c='r')
+            plt.scatter(eye_pts[:, 0], eye_pts[:, 1], s=3, marker='.', c='g')
             plt.title("Original Image")
             for i in range(npoints):
                 plt.subplot(1, 8, i+3)
                 plt.imshow(target[i], cmap='hot')
                 plt.title(f"Target {i+1}")
-            plt.show()
+            plt.show() 
             '''
             
+            pupil_dist = torch.tensor(pupil_dist)
+            Width = torch.tensor(Width)
+            Height = torch.tensor(Height)
+
         except Exception as e:
             idx = idx-1
             image_path = os.path.join(self.data_path, self.label[idx][0])
             
             pts = self.label[idx][1]
+            pupil_dist = self.label[idx][2]
             npoints = len(pts)
 
             # load image and convert to rgb
             img = Image.open(image_path)
             
             ori_img = img.copy()
-            H, W = img.size
-
+            Height, Width = img.size
 
             img = self.transformEye(img)
 
             target = np.zeros((npoints, self.heatmap_size[0], self.heatmap_size[1]))
             tpts = pts.copy()
+            eye_pts = []
 
             for i in range(npoints):
                 orig_x, orig_y = tpts[i][0], tpts[i][1]
  
-                x_scale = self.heatmap_size[0] / W
-                y_scale = self.heatmap_size[1] / H
+                x_scale = self.heatmap_size[0] / Width
+                y_scale = self.heatmap_size[1] / Height
 
                 scaled_x = orig_x * x_scale
                 scaled_y = orig_y * y_scale
 
                 target[i] = generate_target(target[i], (scaled_x, scaled_y), self.sigma, label_type='Gaussian')
+                eye_pts.append([orig_x, orig_y])
 
-
+            #print("eye pts: ", eye_pts)
             heatmaps = torch.Tensor(target)
-            tpts = torch.Tensor(tpts)
+            eye_pts = torch.Tensor(eye_pts)
             
-            meta = {'index': idx, 'pts': torch.Tensor(pts), 'tpts': tpts}
-            convert_pts = extract_keypoints_from_heatmap_to_ori_size(target, W, H)
+            convert_pts = extract_keypoints_from_heatmap_to_ori_size(target, Width, Height)
+
+            #print("converted pts: ", convert_pts)
             '''
            # Display original and resized images with landmarks
             plt.figure(figsize=(10, 10))
@@ -256,10 +268,11 @@ class gi4e_eye(data.Dataset):
 
             plt.show()
             '''
-
-            
-        return img, heatmaps
-
+            pupil_dist = torch.tensor(pupil_dist)
+            Width = torch.tensor(Width)
+            Height = torch.tensor(Height)
+        return img, heatmaps, eye_pts, pupil_dist, Width, Height
+    
 def extract_keypoints_from_heatmap_to_ori_size(heatmap, width_orig, height_orig):
     num_keypoints = heatmap.shape[0]
     keypoints = np.zeros((num_keypoints, 2))
@@ -282,7 +295,7 @@ def extract_keypoints_from_heatmap_to_ori_size(heatmap, width_orig, height_orig)
 if __name__ == '__main__':
     #dataTrain = gi4e(data_path=r'F:\gi4e_database\images', csv_path=r'F:\gi4e_database\image_labels.csv',sigma=1.0)
     #img, heatmaps = dataTrain[12]
-    dataTrain = gi4e_eye(data_path=r'F:\gi4e_database\blend', json_path=r'F:\gi4e_database\blend_eye_pt.json',sigma=1.0,img_size=(64, 64),heatmap_size=(64, 64))
+    dataTrain = gi4e_eye(data_path=r'D:\gi4e_database\blend', json_path=r'D:\gi4e_database\blend_eye_pt.json',sigma=1.0,img_size=(32,32),heatmap_size=(32,32))
     for i in range(50):
-        img, heatmaps = dataTrain[i]
+        img, heatmaps, eye_pts, pupil_dist, Width, Height = dataTrain[i]
     

@@ -1,4 +1,5 @@
 import numpy as np
+import torch
 
 def extract_keypoints_from_heatmap(heatmap):
     num_keypoints = heatmap.shape[0]
@@ -62,4 +63,33 @@ def soft_extract_keypoints_from_heatmap(heatmap, width_orig, height_orig):
         keypoints[i] = [x, y]
 
     return keypoints
+
+
+def extract_keypoints_from_heatmap_to_ori_size_batch(heatmaps, widths_orig, heights_orig):
+    batch_size, num_keypoints, _, _ = heatmaps.shape
+    keypoints = torch.zeros((batch_size, num_keypoints, 2), device=heatmaps.device)
+
+    for b in range(batch_size):
+        for i in range(num_keypoints):
+            flat_index = torch.argmax(heatmaps[b, i, :, :])  # 找到最大值的一维索引
+            y, x = torch.div(flat_index, heatmaps.shape[3], rounding_mode='trunc'), flat_index % heatmaps.shape[3]  # 将一维索引转为二维坐标
+
+            # 转换坐标到原图的尺寸
+            x_scale = widths_orig[b] / heatmaps.shape[3]
+            y_scale = heights_orig[b] / heatmaps.shape[2]
+            x = x.float() * x_scale
+            y = y.float() * y_scale
+
+            keypoints[b, i] = torch.tensor([x, y], device=heatmaps.device)
+
+    return keypoints
+
+# 输入均为放cuda上的一个batch的tensor数据，返回该batch根据映射回原切出眼睛图像的坐标系上的keypoints坐标与label的欧式距离，除以瞳孔距离
+def cal_batch_error(pred_hm, eye_pts, Width, Height, pupil_dist):
+    pred_pts = extract_keypoints_from_heatmap_to_ori_size_batch(pred_hm, Width, Height)
+    eu_dist = torch.sqrt(torch.sum((pred_pts - eye_pts)**2, dim=-1))
+    norm_eu_dist = eu_dist / pupil_dist
+    error = torch.mean(eu_dist)
+    norm_error = torch.mean(norm_eu_dist)
+    return error, norm_error
 

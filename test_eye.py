@@ -34,8 +34,9 @@ parser.add_argument('--num_workers', default=4)
 parser.add_argument('--deepsupervision', default=False)
 args = parser.parse_args()
 
-def main(model):
-    model = load_model(model, args.weight_path)
+def test_main(model, weight_path):
+    model.eval()
+    model = load_model(model, weight_path)
     model = model.cuda()
     dataTest = gi4e_eye(data_path=args.data_path, json_path=args.test_path, sigma=1.0, img_size=args.img_size, heatmap_size=args.heatmap_size)
 
@@ -81,7 +82,6 @@ def test(model, test_loader, criterion):
                     loss = criterion(pred_hm, heatmap)
                 
                 error, norm_error = cal_batch_error(pred_hm, eye_pts, Width, Height, pupil_dist)
-                
 
                 test_loss += loss.item()
                 test_error += norm_error.cpu().item()
@@ -127,9 +127,9 @@ if __name__ == "__main__":
     if args.model == 'UNet':
         model = UNet()
     elif args.model == 'UNet++':
-        model =NestedUNet(args.deepsupervision)
-    model.eval()
-    mean_test_loss, mean_test_error, mean_inference_time, mean_inference_time_per_frame = main(model)
+        model = NestedUNet(args.deepsupervision)
+    
+    mean_test_loss, mean_test_error, mean_inference_time, mean_inference_time_per_frame = test_main(model, args.weight_path)
 
 
 

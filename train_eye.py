@@ -17,18 +17,20 @@ from loss import AdaptiveWingLoss
 
 from dataset.gi4e import gi4e_eye
 import matplotlib.pyplot as plt
+from test_eye import test_main
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--data_path', default=r'D:\gi4e_database\blend')
 parser.add_argument('--train_path', default=r'D:\gi4e_database\eye_train.json')
 parser.add_argument('--val_path', default=r'D:\gi4e_database\eye_val.json')
+parser.add_argument('--test_path', default=r'D:\gi4e_database\eye_test.json')
 parser.add_argument('--model', default='UNet++') # 可选 [UNet, UNet++]
 parser.add_argument('--loss', default='AdaWing')  # 可选 [AdaWing, MSE]
 parser.add_argument('--img_size', default=(64, 64))       # 尺寸可选32， 64， 128
 parser.add_argument('--heatmap_size', default=(64, 64))
 parser.add_argument('--sigma', default=1.0)
 parser.add_argument('--pretrained_path', default=None)
-parser.add_argument('--epochs', default=20)
+parser.add_argument('--epochs', default=1)
 parser.add_argument('--batch_size', default=4)
 parser.add_argument('--num_workers', default=4)
 parser.add_argument('--save_per_epoch', default=1)
@@ -133,7 +135,6 @@ def train(model, criterion, optimizer, scheduler, dataTrain, dataVal):
                     loss = criterion(pred_hm, heatmap)
                 
                 error, norm_error = cal_batch_error(pred_hm, eye_pts, Width, Height, pupil_dist)
-                
                
                 # compute gradient and do SGD step
                 optimizer.zero_grad()
@@ -175,6 +176,8 @@ def train(model, criterion, optimizer, scheduler, dataTrain, dataVal):
                 if mean_val_loss < best_val_loss:
                     best_val_loss = mean_val_loss
                     torch.save(model.state_dict(), os.path.join(checkpoints_dir, 'best.pth'))
+    test_main(model, os.path.join(checkpoints_dir, 'best.pth'))
+    
         
 def validate(model, val_loader, criterion):
     if len(val_loader) == 0:

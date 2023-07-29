@@ -1,4 +1,4 @@
-import os, argparse
+import os, argparse,json, sys
 import numpy as np
 from tqdm import tqdm
 from datetime import datetime
@@ -9,6 +9,7 @@ import torch.nn.parallel
 import torch.backends.cudnn as cudnn
 import torch.optim
 import torch.utils.data
+import csv
 
 from model.Unet import UNet
 from model.Unetpp import NestedUNet
@@ -17,7 +18,7 @@ from loss import AdaptiveWingLoss
 
 from dataset.gi4e import gi4e_eye
 import matplotlib.pyplot as plt
-from test_eye import test_main
+import time
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--data_path', default=r'D:\gi4e_database\blend')
@@ -26,15 +27,16 @@ parser.add_argument('--val_path', default=r'D:\gi4e_database\eye_val.json')
 parser.add_argument('--test_path', default=r'D:\gi4e_database\eye_test.json')
 parser.add_argument('--model', default='UNet++') # 可选 [UNet, UNet++]
 parser.add_argument('--loss', default='AdaWing')  # 可选 [AdaWing, MSE]
-parser.add_argument('--img_size', default=(64, 64))       # 尺寸可选32， 64， 128
-parser.add_argument('--heatmap_size', default=(64, 64))
-parser.add_argument('--sigma', default=1.0)
+parser.add_argument('--img_size', default=64)       # 可选[32，64]
+parser.add_argument('--heatmap_size', default=64)   # 可选[32，64]
+parser.add_argument('--sigma', default=1.0)               # 可选[0.5, 1.0, 2.0]
 parser.add_argument('--pretrained_path', default=None)
 parser.add_argument('--epochs', default=1)
 parser.add_argument('--batch_size', default=4)
 parser.add_argument('--num_workers', default=4)
 parser.add_argument('--save_per_epoch', default=1)
 parser.add_argument('--deepsupervision', default=False)
+parser.add_argument('--randround', default=1)   #可选[0,1]
 args = parser.parse_args()
 
 save_cp_and_plot = True
@@ -55,8 +57,8 @@ lr_decay_gamma = 0.1
 def main(model):
     model.cuda()
     cudnn.benchmark = True 
-    dataTrain = gi4e_eye(data_path=args.data_path, json_path=args.train_path,sigma=args.sigma, img_size=args.img_size, heatmap_size=args.heatmap_size)
-    dataVal = gi4e_eye(data_path=args.data_path, json_path=args.val_path,sigma=args.sigma, img_size=args.img_size, heatmap_size=args.heatmap_size)
+    dataTrain = gi4e_eye(data_path=args.data_path, json_path=args.train_path,sigma=float(args.sigma), img_size=int(args.img_size), heatmap_size=int(args.heatmap_size))
+    dataVal = gi4e_eye(data_path=args.data_path, json_path=args.val_path,sigma=float(args.sigma), img_size=int(args.img_size), heatmap_size=int(args.heatmap_size))
    
     if args.loss == 'MSE':
         criterion = nn.MSELoss().cuda()
@@ -131,10 +133,11 @@ def train(model, criterion, optimizer, scheduler, dataTrain, dataVal):
                     for pred_one_hm in pred_hm:
                         one_loss = criterion(pred_one_hm, heatmap)
                         loss += one_loss
+                    pred_hm = pred_hm[3]
                 else:
                     loss = criterion(pred_hm, heatmap)
                 
-                error, norm_error = cal_batch_error(pred_hm, eye_pts, Width, Height, pupil_dist)
+                error, norm_error = cal_batch_error(pred_hm, eye_pts, Width, Height, pupil_dist, int(args.randround))
                
                 # compute gradient and do SGD step
                 optimizer.zero_grad()
@@ -166,7 +169,7 @@ def train(model, criterion, optimizer, scheduler, dataTrain, dataVal):
         val_error.append(mean_val_error)
 
         if save_cp_and_plot:
-            checkpoints_dir = f"results/{args.model}_sz{args.img_size[0]}_sig{args.sigma}_ep{args.epochs}_{args.loss}"
+            checkpoints_dir = f"results/{args.model}_sz{args.img_size}_sig{args.sigma}_ep{args.epochs}_{args.loss}_r{args.randround}"
             os.makedirs(checkpoints_dir, exist_ok=True)
             save_loss_jpg(e, train_loss,val_loss,checkpoints_dir)
             save_error_jpg(e, train_error,val_error,checkpoints_dir)
@@ -176,7 +179,23 @@ def train(model, criterion, optimizer, scheduler, dataTrain, dataVal):
                 if mean_val_loss < best_val_loss:
                     best_val_loss = mean_val_loss
                     torch.save(model.state_dict(), os.path.join(checkpoints_dir, 'best.pth'))
-    test_main(model, os.path.join(checkpoints_dir, 'best.pth'))
+    mean_test_loss, mean_test_error, mean_inference_time, mean_inference_time_per_frame = test_main(model, os.path.join(checkpoints_dir, 'best.pth'))
+    output_dict = {
+    'settings': checkpoints_dir,
+    'mean_test_loss': mean_test_loss,
+    'mean_test_norm_error': mean_test_error,
+    'mean_inference_time': mean_inference_time,
+    'mean_inference_time_per_frame': mean_inference_time_per_frame,
+    }
+
+    filename = 'test_result.csv'
+    if not os.path.exists(filename):
+        with open(filename, 'w', newline='') as f:
+            writer = csv.DictWriter(f, fieldnames=output_dict.keys())
+            writer.writeheader()
+    with open(filename, 'a', newline='') as f:
+        writer = csv.DictWriter(f, fieldnames=output_dict.keys())
+        writer.writerow(output_dict)
     
         
 def validate(model, val_loader, criterion):
@@ -202,9 +221,10 @@ def validate(model, val_loader, criterion):
                     for pred_one_hm in pred_hm:
                         one_loss = criterion(pred_one_hm, heatmap)
                         loss += one_loss
+                    pred_hm = pred_hm[3]
                 else:
                     loss = criterion(pred_hm, heatmap)
-                error, norm_error = cal_batch_error(pred_hm, eye_pts, Width, Height, pupil_dist)
+                error, norm_error = cal_batch_error(pred_hm, eye_pts, Width, Height, pupil_dist, int(args.randround))
 
                 val_loss += loss.item()
                 val_error += norm_error.cpu().item()
@@ -229,9 +249,11 @@ def save_loss_jpg(e, train_loss, val_loss, checkpoints_dir):
     plt.figure(figsize=(10,8))
     plt.plot(e, train_loss, linestyle="-", color="red", marker="o", label="train_loss")
     plt.plot(e, val_loss, linestyle="-", color="green", marker="o", label="val_loss")
-    plt.xlabel("Epochs")
-    plt.ylabel("Loss")
-    plt.legend()
+    plt.xlabel("Epochs", fontsize=16)
+    plt.ylabel("Loss", fontsize=16)
+    plt.xticks(fontsize=14)
+    plt.yticks(fontsize=14)
+    plt.legend(fontsize=16, markerscale=2)
     plt.tight_layout()
     plt.savefig(os.path.join(checkpoints_dir, "loss_plot.jpg"), dpi=600)
 
@@ -239,11 +261,102 @@ def save_error_jpg(e, train_loss, val_loss, checkpoints_dir):
     plt.figure(figsize=(10,8))
     plt.plot(e, train_loss, linestyle="-", color="red", marker="o", label="train_error")
     plt.plot(e, val_loss, linestyle="-", color="green", marker="o", label="val_error")
-    plt.xlabel("Epochs")
-    plt.ylabel("Error")
-    plt.legend()
+    plt.xlabel("Epochs", fontsize=16)
+    plt.ylabel("Error", fontsize=16)
+    plt.xticks(fontsize=14)
+    plt.yticks(fontsize=14)
+    plt.legend(fontsize=16, markerscale=2)
     plt.tight_layout()
     plt.savefig(os.path.join(checkpoints_dir, "error_plot.jpg"), dpi=600)
+
+
+def test_main(model, weight_path):
+    model.eval()
+    model = load_model(model, weight_path)
+    model = model.cuda()
+    dataTest = gi4e_eye(data_path=args.data_path, json_path=args.test_path, sigma=float(args.sigma), img_size=int(args.img_size), heatmap_size=int(args.heatmap_size))
+
+    if args.loss == 'MSE':
+        criterion = nn.MSELoss().cuda()
+    elif args.loss == 'AdaWing':
+        criterion = AdaptiveWingLoss().cuda()
+
+    test_loader = torch.utils.data.DataLoader(
+        dataTest,
+        batch_size=args.batch_size, shuffle=False,
+        num_workers=args.num_workers, pin_memory=True, prefetch_factor=2)
+    mean_test_loss, mean_test_error, mean_inference_time, mean_inference_time_per_frame = test(model, test_loader, criterion)
+    return mean_test_loss, mean_test_error, mean_inference_time, mean_inference_time_per_frame
+
+def test(model, test_loader, criterion):
+    if len(test_loader) == 0:
+        print("NO Test SET!")
+        return 0, 0
+    else:
+        test_loss=0
+        test_error=0
+        inference_times = []
+        with tqdm(total=len(test_loader), desc="Test") as vbar:
+            for i, (img, heatmap, eye_pts, pupil_dist, Width, Height) in enumerate(test_loader):
+                start_time = time.time() 
+                img = img.cuda()
+                heatmap = heatmap.cuda()
+                eye_pts =eye_pts.cuda()
+                pupil_dist = pupil_dist.cuda()
+                Width = Width.cuda()
+                Height = Height.cuda()
+                pupil_dist = pupil_dist.view(-1, 1)
+
+                pred_hm = model(img)
+                if args.deepsupervision:
+                    loss = 0
+                    for pred_one_hm in pred_hm:
+                        one_loss = criterion(pred_one_hm, heatmap)
+                        loss += one_loss
+                    pred_hm = pred_hm[3]   
+                else:
+                    loss = criterion(pred_hm, heatmap)
+                
+                error, norm_error = cal_batch_error(pred_hm, eye_pts, Width, Height, pupil_dist, int(args.randround))
+
+                test_loss += loss.item()
+                test_error += norm_error.cpu().item()
+                end_time = time.time() 
+                inference_times.append(end_time - start_time) 
+
+                vbar.set_postfix(**{'loss per batch': loss.item()})
+                vbar.update()
+
+            mean_test_loss = round(test_loss / len(test_loader), 5)
+            mean_test_error = round(test_error / len(test_loader), 5)
+            mean_inference_time = round(sum(inference_times) / len(inference_times), 5)
+            mean_inference_time_per_frame = round(mean_inference_time/int(args.batch_size), 5)
+        print("Test Loss: ", mean_test_loss, "Test Norm Error", mean_test_error, "Inference Time(s) Per Batch({}):".format(args.batch_size), mean_inference_time, "Mean Inference Time(s) Per Frame:", mean_inference_time_per_frame)
+
+        return mean_test_loss, mean_test_error, mean_inference_time, mean_inference_time_per_frame
+
+
+def load_model(model, weight_path):
+    if weight_path is None:
+        print("No weights path provided!")
+        sys.exit(1)
+
+    try:
+        pretrained_dict = torch.load(weight_path)
+        model_dict = model.state_dict()
+        pretrained_dict = {k: v for k, v in pretrained_dict.items() if k in model_dict}
+        model_dict.update(pretrained_dict)
+        model.load_state_dict(model_dict)
+
+        print("Weights {} loaded successfully.".format(os.path.basename(weight_path)))
+    except FileNotFoundError:
+        print("Weights file not found!")
+        sys.exit(1)
+    except Exception as e:
+        print("Error loading pretrained weights:", e)
+        sys.exit(1)
+    return model
+
 
 
 if __name__ == "__main__":

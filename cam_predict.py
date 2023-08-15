@@ -1,21 +1,16 @@
 import cv2
 import os, sys
-import concurrent.futures
 from pathlib import Path
 import time
 import numpy as np
-from tqdm import tqdm
-import scipy.io as sio
-import json
-import pandas as pd
-import matplotlib.pyplot as plt
 import torchvision.transforms as transforms
 from PIL import Image
 import torch
 
 from tools.mediapipe_eye_detector import MPFacialLandmarkDetector
 from model.Unet import UNet
-from tools.heatmap_trans import extract_keypoints_from_heatmap, extract_keypoints_from_heatmap_to_ori_size
+from model.Unetpp import NestedUNet
+from tools.heatmap_trans import *
 
 
 class Preprocessor:
@@ -60,8 +55,12 @@ class Preprocessor:
         
 def convert_keypoints_to_original_frame(left_eye_heatmap_output, right_eye_heatmap_output, Leye_bbox_pts, Reye_bbox_pts, left_w, left_h, right_w, right_h):
     # 先将热力图映射回裁剪出来眼睛图片的尺寸输出keypoints
-    left_keypoints = extract_keypoints_from_heatmap_to_ori_size(left_eye_heatmap_output, left_w, left_h)
-    right_keypoints = extract_keypoints_from_heatmap_to_ori_size(right_eye_heatmap_output, right_w, right_h)
+    left_w = torch.tensor([left_w]).unsqueeze(0).cuda()
+    left_h = torch.tensor([left_h]).unsqueeze(0).cuda()
+    right_w = torch.tensor([right_w]).unsqueeze(0).cuda()
+    right_h = torch.tensor([right_h]).unsqueeze(0).cuda()
+    left_keypoints = extract_keypoints_from_heatmap_to_ori_size_batch(left_eye_heatmap_output, left_w, left_h).squeeze(0).cpu()
+    right_keypoints = extract_keypoints_from_heatmap_to_ori_size_batch(right_eye_heatmap_output, right_w, right_h).squeeze(0).cpu()
     # 裁剪出的小图的左上角坐标为 左眼：(Leye_bbox_pts[0][0], Leye_bbox_pts[0][1]) 右眼(Reye_bbox_pts[0][0], Reye_bbox_pts[0][1]) 只要每个点加上这个点即可
     left_keypoints = np.array(left_keypoints) + np.array([Leye_bbox_pts[0][0], Leye_bbox_pts[0][1]])
     right_keypoints = np.array(right_keypoints) + np.array([Reye_bbox_pts[0][0], Reye_bbox_pts[0][1]])
@@ -88,14 +87,14 @@ def load_model(model, weight_path):
         sys.exit(1)
     return model
 
-def main(img_size=(32,32), heatmap_size=(32,32), weight_path = r'C:\Users\Xuli\Desktop\hrnet_gi4e\results\0719_0038\best.pth'):
+def main(img_size=(64,64), heatmap_size=(64,64), weight_path = r'C:\Users\Xuli\Desktop\hrnet_gi4e\Best\best.pth'):
     # device
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     # facail landmark 检测器
     landmark_detector = MPFacialLandmarkDetector()
     # 原图->送入模型的左右眼tensor 预处理器
     preprocessor = Preprocessor(img_size, heatmap_size, landmark_detector=landmark_detector)
-    model = UNet()
+    model = NestedUNet()
     model.eval()
     model = load_model(model, weight_path)
     model = model.cuda()
@@ -117,8 +116,8 @@ def main(img_size=(32,32), heatmap_size=(32,32), weight_path = r'C:\Users\Xuli\D
             Reye = Reye.cuda()
             left_eye_heatmap_output = model(Leye)
             right_eye_heatmap_output = model(Reye)
-        left_eye_heatmap_output = left_eye_heatmap_output.squeeze().cpu().numpy()
-        right_eye_heatmap_output = right_eye_heatmap_output.squeeze().cpu().numpy()
+        left_eye_heatmap_output = left_eye_heatmap_output      #.squeeze().cpu().numpy()
+        right_eye_heatmap_output = right_eye_heatmap_output     #.squeeze().cpu().numpy()
             # 输出转换为原图的坐标点
         left_keypoints, right_keypoints = convert_keypoints_to_original_frame(left_eye_heatmap_output, right_eye_heatmap_output, Leye_bbox_pts, Reye_bbox_pts, left_w, left_h, right_w, right_h)
             # 将点绘制在原图上
@@ -135,7 +134,7 @@ def main(img_size=(32,32), heatmap_size=(32,32), weight_path = r'C:\Users\Xuli\D
     cv2.destroyAllWindows()
 
 if __name__ == '__main__':
-    main(img_size=(32,32), heatmap_size=(32,32), weight_path = r'C:\Users\Xuli\Desktop\hrnet_gi4e\results\0719_0038\best.pth')
+    main(img_size=(64,64), heatmap_size=(64,64), weight_path = r'C:\Users\Xuli\Desktop\hrnet_gi4e\Best\best.pth')
 
             
  

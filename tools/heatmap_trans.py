@@ -86,14 +86,20 @@ def extract_keypoints_from_heatmap_to_ori_size_batch(heatmaps, widths_orig, heig
     return keypoints
 
 # 输入均为放cuda上的一个batch的tensor数据，返回该batch根据映射回原切出眼睛图像的坐标系上的keypoints坐标与label的欧式距离，除以瞳孔距离
-def cal_batch_error(pred_hm, eye_pts, Width, Height, pupil_dist):
+def cal_batch_error(pred_hm, eye_pts, Width, Height, pupil_dist, randomrounding):
     #pred_pts = extract_keypoints_from_heatmap_to_ori_size_batch(pred_hm, Width, Height)
-    pred_pts = heatmap2coord(pred_hm, Width, Height, topk=9)
+    if randomrounding == 1:
+        pred_pts = heatmap2coord(pred_hm, Width, Height, topk=9)
+    else:
+        pred_pts = extract_keypoints_from_heatmap_to_ori_size_batch(pred_hm, Width, Height)
     eu_dist = torch.sqrt(torch.sum((pred_pts - eye_pts)**2, dim=-1))
     norm_eu_dist = eu_dist / pupil_dist
     error = torch.mean(eu_dist)
     norm_error = torch.mean(norm_eu_dist)
-    return error, norm_error
+    return error, norm_error, norm_eu_dist
+
+
+    
 
 # 使用random rounding 转换heatmaps->keypoints 注意，输入输出都是cuda上的tensor
 def heatmap2coord(heatmap, org_W, org_H, topk=9):

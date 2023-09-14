@@ -10,6 +10,7 @@ import scipy.io as sio
 import json
 import pandas as pd
 import matplotlib.pyplot as plt
+import math
 
 
 def process_images(img_path, img_name, pts, landmark_detector, root_path, eye_label):
@@ -46,13 +47,17 @@ def process_images(img_path, img_name, pts, landmark_detector, root_path, eye_la
             # convert the eye points in the original image to the cropped eye image
             left_eye_pts = [[pt[0] - Leye_bbox_pts[0][0], pt[1] - Leye_bbox_pts[0][1]] for pt in pts[3:]]
             right_eye_pts = [[pt[0] - Reye_bbox_pts[0][0], pt[1] - Reye_bbox_pts[0][1]] for pt in pts[:3]]
+
+            # 计算pupillary distance 用于normalize error
+            pupil_dis = round(math.sqrt((pts[1][0] - pts[4][0])**2 + (pts[1][1] - pts[4][1])**2),5)
+
             eye_pts = [left_eye_pts, right_eye_pts]
             #eye_label[img_name] = eye_pts
             l_img_name = 'L_' + img_name 
-            r_img_name = 'R_' + img_name 
+            r_img_name = 'R_' + img_name
 
-            eye_label.append([l_img_name, left_eye_pts])
-            eye_label.append([r_img_name, right_eye_pts])
+            eye_label.append([l_img_name, left_eye_pts, pupil_dis])
+            eye_label.append([r_img_name, right_eye_pts, pupil_dis])
             '''
             # draw the points on the cropped eye images
             for pt in left_eye_pts:
@@ -74,14 +79,6 @@ def process_images(img_path, img_name, pts, landmark_detector, root_path, eye_la
             plt.title('Right Eye')
             plt.show()
             '''
-
-
-
-
-
-
-
-
 def process_dataset(root_path):
     landmark_detector = MPFacialLandmarkDetector()
     img_root = os.path.join(root_path, 'images')
@@ -98,10 +95,7 @@ def process_dataset(root_path):
         json.dump(eye_label, f)
 
 
-
-
 if __name__ == '__main__':
-
-    root_path = r'F:\gi4e_database'
+    root_path = r'D:\gi4e_database'
     process_dataset(root_path)
     

@@ -12,7 +12,7 @@ from model.Unet import UNet
 from model.Unetpp import NestedUNet
 from tools.heatmap_trans import *
 
-
+# Define the preprocessor for left and right eye patch extraction
 class Preprocessor:
     def __init__(self, img_size, heatmap_size, landmark_detector):
         self.img_size = img_size
@@ -54,14 +54,14 @@ class Preprocessor:
         
         
 def convert_keypoints_to_original_frame(left_eye_heatmap_output, right_eye_heatmap_output, Leye_bbox_pts, Reye_bbox_pts, left_w, left_h, right_w, right_h):
-    # 先将热力图映射回裁剪出来眼睛图片的尺寸输出keypoints
+    # map the heatmap to the original image size and get the keypoint coords
     left_w = torch.tensor([left_w]).unsqueeze(0).cuda()
     left_h = torch.tensor([left_h]).unsqueeze(0).cuda()
     right_w = torch.tensor([right_w]).unsqueeze(0).cuda()
     right_h = torch.tensor([right_h]).unsqueeze(0).cuda()
     left_keypoints = extract_keypoints_from_heatmap_to_ori_size_batch(left_eye_heatmap_output, left_w, left_h).squeeze(0).cpu()
     right_keypoints = extract_keypoints_from_heatmap_to_ori_size_batch(right_eye_heatmap_output, right_w, right_h).squeeze(0).cpu()
-    # 裁剪出的小图的左上角坐标为 左眼：(Leye_bbox_pts[0][0], Leye_bbox_pts[0][1]) 右眼(Reye_bbox_pts[0][0], Reye_bbox_pts[0][1]) 只要每个点加上这个点即可
+    # cropped eyes: Left eye：(Leye_bbox_pts[0][0], Leye_bbox_pts[0][1]) Right Eye (Reye_bbox_pts[0][0], Reye_bbox_pts[0][1]), Each point add the upper-left coord.
     left_keypoints = np.array(left_keypoints) + np.array([Leye_bbox_pts[0][0], Leye_bbox_pts[0][1]])
     right_keypoints = np.array(right_keypoints) + np.array([Reye_bbox_pts[0][0], Reye_bbox_pts[0][1]])
     return left_keypoints, right_keypoints
@@ -90,26 +90,22 @@ def load_model(model, weight_path):
 def main(img_size=(64,64), heatmap_size=(64,64), weight_path = r'C:\Users\Xuli\Desktop\hrnet_gi4e\Best\best.pth'):
     # device
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    # facail landmark 检测器
+    # facail landmark detector
     landmark_detector = MPFacialLandmarkDetector()
-    # 原图->送入模型的左右眼tensor 预处理器
+    # original image -> prreprocessor
     preprocessor = Preprocessor(img_size, heatmap_size, landmark_detector=landmark_detector)
     model = NestedUNet()
     model.eval()
     model = load_model(model, weight_path)
     model = model.cuda()
-    # 使用OpenCV打开摄像头
     cap = cv2.VideoCapture(0)
 
-    # 循环获取摄像头的画面并进行推理
     while True:
-        # 读取一帧图像
         ret, frame = cap.read()
 
         if not ret:
             break
         start = time.time()
-        # 将图像转化为模型需要的输入格式，比如转为Tensor，做归一化等操作
         Leye, Reye, Leye_bbox_pts, Reye_bbox_pts, left_w, left_h, right_w, right_h = preprocessor.preprocess_frame_to_tensor(frame)
         with torch.no_grad():
             Leye = Leye.cuda()
@@ -118,13 +114,9 @@ def main(img_size=(64,64), heatmap_size=(64,64), weight_path = r'C:\Users\Xuli\D
             right_eye_heatmap_output = model(Reye)
         left_eye_heatmap_output = left_eye_heatmap_output      #.squeeze().cpu().numpy()
         right_eye_heatmap_output = right_eye_heatmap_output     #.squeeze().cpu().numpy()
-            # 输出转换为原图的坐标点
         left_keypoints, right_keypoints = convert_keypoints_to_original_frame(left_eye_heatmap_output, right_eye_heatmap_output, Leye_bbox_pts, Reye_bbox_pts, left_w, left_h, right_w, right_h)
-            # 将点绘制在原图上
-            # 左眼
         for i in range(3):
             cv2.circle(frame, tuple(map(int, left_keypoints[i])), 1, (0, 0, 255), -1)
-            # 右眼
         for j in range(3):
             cv2.circle(frame, tuple(map(int, right_keypoints[j])), 1, (0, 0, 255), -1)
         print("Process Time(s) Per Image", time.time()-start)

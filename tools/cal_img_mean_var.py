@@ -26,8 +26,8 @@ for i in tqdm(range(3)):
       pixels = imgs[:,:,i,:].ravel() # 拉成一行
       means.append(np.mean(pixels))
       stdevs.append(np.std(pixels))
-# cv2 读取的图像格式为BGR，PIL/Skimage读取到的都是RGB不用转
-means.reverse() # BGR --> RGB
+   
+means.reverse() # BGR -> RGB
 stdevs.reverse()
 print("normMean = {}".format(means))
 print("normStd = {}".format(stdevs))

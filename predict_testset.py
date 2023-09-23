@@ -45,7 +45,7 @@ def predict_eye_center_testset(model, img_path, weight_path,keypoints_gt, img_si
     
     output = output.squeeze().cpu().numpy()
     
-     # 显示左侧的单张图像, 点已经绘制上去了
+     # show the image with keypoints 
     plt.subplot(1, 5 , 1)
     plt.imshow(img_copy1)
     plt.title(f"Input")
